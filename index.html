@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Papertrail — Research assistant</title>
+    <style>
+      :root { --ink:#17212b; --muted:#65717d; --line:#dfe4e8; --paper:#fffdf9; --accent:#1c6959; --soft:#e4f2ed; }
+      * { box-sizing:border-box; } body { margin:0; color:var(--ink); background:#f5f4f0; font:16px/1.5 Inter, ui-sans-serif, system-ui, sans-serif; }
+      main { max-width:900px; margin:auto; padding:34px 22px 64px; } header { display:flex; align-items:center; justify-content:space-between; margin-bottom:54px; }
+      .brand { font-family:Georgia,serif; font-size:24px; letter-spacing:-.8px; } .tag { color:var(--accent); background:var(--soft); padding:5px 10px; border-radius:99px; font-size:12px; font-weight:700; }
+      h1 { font:500 clamp(38px,6vw,66px)/1.04 Georgia,serif; letter-spacing:-2.5px; margin:0 auto 18px; max-width:740px; text-align:center; } .intro { max-width:550px; margin:0 auto 38px; color:var(--muted); text-align:center; }
+      .panel { background:var(--paper); border:1px solid var(--line); border-radius:18px; box-shadow:0 12px 30px #17212b0a; overflow:hidden; }
+      .upload { padding:25px; border:2px dashed #b8c8c2; margin:14px; border-radius:12px; text-align:center; cursor:pointer; transition:.2s; } .upload:hover { background:#f5faf7; border-color:var(--accent); }
+      .upload strong { display:block; font-size:17px; margin-bottom:5px; }.upload span { color:var(--muted); font-size:14px; } input[type=file] { display:none; }
+      .ready { display:none; padding:14px 20px; background:var(--soft); color:#185244; font-size:14px; justify-content:space-between; align-items:center; }.ready.show { display:flex; }.ready button { border:0; background:transparent; color:inherit; cursor:pointer; text-decoration:underline; }
+      #chat { display:none; padding:22px; }.message { max-width:84%; padding:15px 17px; margin:0 0 18px; border-radius:14px; white-space:pre-wrap; }.assistant { background:#f0f2f2; }.user { background:var(--accent); color:white; margin-left:auto; }.sources { font-size:13px; color:var(--muted); margin:-9px 0 20px; }.sources b { color:var(--ink); }
+      form { display:flex; gap:10px; border-top:1px solid var(--line); padding:16px; } textarea { flex:1; resize:none; border:1px solid var(--line); border-radius:10px; padding:12px; font:inherit; min-height:48px; } button[type=submit] { border:0; background:var(--accent); color:white; border-radius:10px; padding:0 19px; font-weight:700; cursor:pointer; } button:disabled { opacity:.55; cursor:wait; }
+      .status { min-height:23px; text-align:center; color:var(--muted); font-size:14px; padding-top:14px; } @media (max-width:550px) { header { margin-bottom:38px; } h1 { letter-spacing:-1.5px; } form { align-items:end; } button[type=submit] { height:48px; padding:0 13px; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header><div class="brand">Papertrail</div><div class="tag">PRIVATE SESSION</div></header>
+      <h1>Interrogate the work.<br />Not your memory.</h1>
+      <p class="intro">Upload a research paper, then ask precise questions. Answers stay grounded in the document you provide.</p>
+      <section class="panel">
+        <label class="upload" id="dropzone" for="paper"><strong>Drop a paper here, or choose a PDF</strong><span>One paper per session · PDF · up to 30 MB</span><input id="paper" type="file" accept="application/pdf,.pdf" /></label>
+        <div id="ready" class="ready"><span>✓ <strong id="filename"></strong> is ready to discuss</span><button id="replace">Replace</button></div>
+        <div id="chat"><div id="messages"></div><form id="ask"><textarea id="question" placeholder="Ask about methods, results, limitations…" rows="1"></textarea><button id="send" type="submit">Ask</button></form></div>
+      </section>
+      <div id="status" class="status"></div>
+    </main>
+    <script>
+      const paper = document.querySelector('#paper'), chat = document.querySelector('#chat'), status = document.querySelector('#status'), ready = document.querySelector('#ready'), messages = document.querySelector('#messages'), send = document.querySelector('#send');
+      let collectionId = null;
+      const setStatus = (text) => status.textContent = text;
+      async function upload(file) {
+        if (!file) return; if (!file.name.toLowerCase().endsWith('.pdf')) return setStatus('Please select a PDF.');
+        setStatus('Reading and indexing your paper…'); document.querySelector('#dropzone').style.pointerEvents = 'none';
+        try { const form = new FormData(); form.append('paper', file); const r = await fetch('/api/upload', { method:'POST', body:form }); const data = await r.json(); if (!r.ok) throw Error(data.error); collectionId = data.id; document.querySelector('#filename').textContent = data.name; ready.classList.add('show'); chat.style.display='block'; document.querySelector('#dropzone').style.display='none'; setStatus('Ready. Ask anything supported by the paper.'); }
+        catch (e) { setStatus(e.message); } finally { document.querySelector('#dropzone').style.pointerEvents = ''; }
+      }
+      paper.addEventListener('change', () => upload(paper.files[0]));
+      document.querySelector('#replace').onclick = () => { collectionId=null; messages.innerHTML=''; ready.classList.remove('show'); chat.style.display='none'; document.querySelector('#dropzone').style.display='block'; paper.value=''; setStatus(''); };
+      document.querySelector('#dropzone').addEventListener('dragover', (e) => { e.preventDefault(); }); document.querySelector('#dropzone').addEventListener('drop', (e) => { e.preventDefault(); upload(e.dataTransfer.files[0]); });
+      function add(text, kind) { const el=document.createElement('div'); el.className=`message ${kind}`; el.textContent=text; messages.append(el); return el; }
+      document.querySelector('#ask').addEventListener('submit', async (e) => { e.preventDefault(); const question=document.querySelector('#question').value.trim(); if (!question || !collectionId) return; add(question,'user'); document.querySelector('#question').value=''; send.disabled=true; const waiting=add('Searching the paper…','assistant'); try { const r=await fetch('/api/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({collectionId,question})}); const data=await r.json(); if (!r.ok) throw Error(data.error); waiting.textContent=data.answer; if(data.citations?.length){const src=document.createElement('div');src.className='sources';src.innerHTML='<b>Sources:</b> '+data.citations.map(c=>c.fileName).join(', ');messages.append(src);} } catch(err){ waiting.textContent='I couldn’t answer that: '+err.message; } finally { send.disabled=false; document.querySelector('#question').focus(); } });
+    </script>
+  </body>
+</html>
